@@ -4,7 +4,7 @@
     --------------------------------------------------------------------------
     Routine to perform aperture photometry on CHIMERA science frames.
     
-    Usage: python photometry.py [options] image coords
+    Usage: python fastphot.py [options] image coords
         
                                 
     Author:
@@ -14,7 +14,8 @@
         Caltech, Pasadena, CA, USA
 
     Version:
-        20 December 2015     0.1dev     Initial implementation 
+        7 January 2016     0.1     Initial implementation 
+        9 February 2016    0.2     User input for photometric zero point
     --------------------------------------------------------------------------        
 """
 
@@ -80,7 +81,7 @@ def plotter(phot_data, nframes, exptime, outfile):
     return
                 
                                 
-def process(infile, coords, method, inner_radius, outer_radius, cen_method, window_size):
+def process(infile, coords, method, inner_radius, outer_radius, cen_method, window_size, output, zmag):
     """
     Entry point function to process science image.
     
@@ -101,12 +102,24 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
     outer_radius : int
         Inner sky annulus radius in pixels
         
+    cen_method : string
+        Centroid method
+        
+    window_size : int
+        Centroid finding window size in pixels
                 
+    output : string
+        Output file name
+        
+    zmag : float
+        Photometric zero point
+                     
+                                                           
     Returns
     -------
     None 
     """
-    print "PHOTOMETRY: CHIMERA Aperture Photometry Routine"
+    print "FASTPHOT: CHIMERA Fast Aperture Photometry Routine"
     
     inner_radius = float(inner_radius)
     outer_radius = float(outer_radius)
@@ -140,10 +153,13 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
         # Instantiate an Aperphot object
         ap = chimera.Aperphot(sci_file, coords)
         
-        # Set fwhmpsf, sigma, annulus and dannulus
+        # Set fwhmpsf, sigma, annulus, dannulus and zmag
         ap.method = method
         ap.inner_radius = inner_radius
         ap.outer_radius = outer_radius
+        
+        if zmag != "":
+            ap.zmag = float(zmag)
         
         # Determine nominal aperture radius for photometry
         if i == 0:
@@ -169,7 +185,7 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
             phot_data[j]['AREA'] = aperphot_data["area"]
             phot_data[j]['FLUX_ADU'] = aperphot_data["flux"]
             phot_data[j]['FLUX_ELEC'] = phot_data[j]['FLUX_ADU'] * ap.epadu
-            phot_data[j]['MAG'] = ap.zmag - 2.5 * np.log10(phot_data[j]['FLUX_ELEC'])
+            phot_data[j]['MAG'] = ap.zmag - 2.5 * np.log10(phot_data[j]['FLUX_ELEC']/ap.exptime)
             
             # Calculate error in flux - using the formula
             # err = sqrt(flux * gain + npix * (1 + (npix/nsky)) * (flux_sky * gain + R**2))
@@ -177,7 +193,10 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
                         
         # Save photometry data in numpy binary format
         print "  Saving photometry data as numpy binary"
-        npy_outfile = sci_file.replace(".fits", ".phot.npy")
+        if output != "":
+            npy_outfile = output + ".npy"
+        else:
+            npy_outfile = sci_file.replace(".fits", ".phot.npy")
         if os.path.exists(npy_outfile):
             os.remove(npy_outfile)
             
@@ -186,7 +205,11 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
         # Plot first pass light curve
         if plot_flag:
             print "  Plotting normalized light curve"
-            plotter(phot_data, ap.nframes, ap.kintime, sci_file.replace(".fits", ".lc.png"))
+            if output != "":
+                plt_outfile = output + ".png"
+            else:
+                plt_outfile = sci_file.replace(".fits", ".lc.png")
+            plotter(phot_data, ap.nframes, ap.kintime, plt_outfile)
         
     return
 
@@ -194,7 +217,7 @@ def process(infile, coords, method, inner_radius, outer_radius, cen_method, wind
 if __name__ == "__main__":
     usage = "Usage: python %prog [options] sci_image coords"
     description = "Description. Utility to perform fast aperture photometry in CHIMERA science images."
-    parser = OptionParser(usage = usage, version = "%prog 0.1", description = description)
+    parser = OptionParser(usage = usage, version = "%prog 0.2", description = description)
     parser.add_option("-v", "--verbose",
                       action="store_true", dest="verbose", default = False,
                       help = "print result messages to stdout"
@@ -204,29 +227,38 @@ if __name__ == "__main__":
                     help = "don't print result messages to stdout"
                     )
     parser.add_option("-m", "--method", dest = "method",
-                    action='store', metavar="METHOD", help = "Method to use for determining overlap between aperture and pixels (default is exact)",
+                    action="store", metavar="METHOD", help = "Method to use for determining overlap between aperture and pixels (default is exact)",
                     default = "exact"
                     )
     parser.add_option("-i", "--inner_radius", dest = "inner_radius",
-                    action='store', metavar="INNER_RADIUS", help = "Inner radius of sky annlus in pixels (default is 14)",
+                    action="store", metavar="INNER_RADIUS", help = "Inner radius of sky annlus in pixels (default is 14)",
                     default = 14
                     )
-    parser.add_option("-o", "--outer_radius", dest = "outer_radius",
-                    action='store', metavar="OUTER_RADIUS", help = "Radius of sky annulus in pixels (default is 16)",
+    parser.add_option("-d", "--outer_radius", dest = "outer_radius",
+                    action="store", metavar="OUTER_RADIUS", help = "Radius of sky annulus in pixels (default is 16)",
                     default = 16
                     )
     parser.add_option("-c", "--cen_method", dest = "cen_method",
-                    action='store', metavar="CEN_METHOD", help = "Centroid method (default is 2dg)",
+                    action="store", metavar="CEN_METHOD", help = "Centroid method (default is 2dg)",
                     default = "2dg"
                     )
     parser.add_option("-w", "--window_size", dest = "window_size",
-                    action='store', metavar="WINDOW_SIZE", help = "Window size for centroid (default is 35)",
+                    action="store", metavar="WINDOW_SIZE", help = "Window size for centroid (default is 35)",
                     default = 35
-                    )                                                                                    
-                                        
+                    )
+    parser.add_option("-o", "--output", dest = "output",
+                    action="store", metavar="OUTPUT", help = "Output file name",
+                    default = ""
+                    )                                                                                                       
+    parser.add_option("-z", "--zmag", dest = "zmag",
+                    action="store", metavar="ZMAG", help = "Photometric zeroo point",
+                    default = ""
+                    )
+                    
+                                                                                
     (options, args) = parser.parse_args()  
     if len(args) != 2:
-        parser.error("PHOTOMETRY: Incorrect number of arguments")
+        parser.error("FASTPHOT: Incorrect number of arguments")
         
     # Check verbosity
     if not options.verbose:
@@ -237,7 +269,7 @@ if __name__ == "__main__":
     # Switch off warnings
     warnings.filterwarnings('ignore')
     
-    process(args[0], args[1], options.method, options.inner_radius, options.outer_radius, options.cen_method, options.window_size)    
+    process(args[0], args[1], options.method, options.inner_radius, options.outer_radius, options.cen_method, options.window_size, options.output, options.zmag)    
 
     # Reset verbosity
     if not options.verbose:
